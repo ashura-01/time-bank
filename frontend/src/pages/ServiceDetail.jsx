@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { servicesAPI, transactionsAPI } from '../services/api';
 import { useAuth } from '../context/AuthContext';
+import ConfirmationModal from '../components/ui/ConfirmationModal';
+import PromptConfirmModal from '../components/ui/PromptConfirmModal';
 
 export default function ServiceDetail() {
   const { id } = useParams();
@@ -10,6 +12,9 @@ export default function ServiceDetail() {
   const [service, setService] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [bookingError, setBookingError] = useState('');
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [creatingTransaction, setCreatingTransaction] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [transactionData, setTransactionData] = useState({
@@ -41,34 +46,34 @@ export default function ServiceDetail() {
     }
 
     if (service.provider_id === user.id) {
-      alert('You cannot transact with your own service');
+      setBookingError('You cannot transact with your own service');
       return;
     }
 
     setCreatingTransaction(true);
+    setBookingError('');
     try {
       await transactionsAPI.create({
         service_id: id,
         ...transactionData
       });
-      alert('Transaction requested! The provider will need to confirm.');
-      navigate('/dashboard');
+      setShowConfirmModal(true);
     } catch (err) {
-      alert(err.response?.data?.error || 'Failed to create transaction');
+      setBookingError(err.response?.data?.error || 'Failed to create transaction');
     } finally {
       setCreatingTransaction(false);
     }
   };
 
-  const handleDelete = async () => {
-    if (!window.confirm('Delete this service? This cannot be undone.')) return;
+  const handleConfirmDelete = async () => {
     setDeleting(true);
     try {
       await servicesAPI.delete(id);
       navigate('/services');
     } catch (err) {
-      alert(err.response?.data?.error || 'Failed to delete service');
+      setBookingError(err.response?.data?.error || 'Failed to delete service');
       setDeleting(false);
+      setShowDeleteModal(false);
     }
   };
 
@@ -138,7 +143,7 @@ export default function ServiceDetail() {
                         style={{ backgroundColor: service.category_color + '20', color: service.category_color }}>
                     {service.category_name}
                   </span>
-                  {service.is_remote && (
+                  {Boolean(service.is_remote) && (
                     <span className="badge badge-gray">Remote Available</span>
                   )}
                 </div>
@@ -202,12 +207,23 @@ export default function ServiceDetail() {
                     <Link to={`/services/${service.id}/edit`} className="btn btn-outline w-full">Edit Service</Link>
                     <button
                       type="button"
-                      onClick={handleDelete}
+                      onClick={() => setShowDeleteModal(true)}
                       disabled={deleting}
                       className="btn btn-outline w-full text-danger border-danger hover:bg-red-50"
                     >
                       {deleting ? 'Deleting...' : 'Delete Service'}
                     </button>
+                  </div>
+                ) : service.status !== 'active' ? (
+                  <div className="text-center">
+                    <span className="badge badge-gray w-full text-center py-3 mb-2">
+                      {service.status === 'completed' ? 'Already fulfilled' : 'No longer available'}
+                    </span>
+                    <p className="text-gray-500 text-sm">
+                      {service.status === 'completed'
+                        ? 'This was a one-time exchange and has already been completed.'
+                        : 'This listing is no longer accepting requests.'}
+                    </p>
                   </div>
                 ) : isAuthenticated ? (
                   <form onSubmit={handleSubmit} className="space-y-4">
@@ -265,6 +281,12 @@ export default function ServiceDetail() {
                       <span className="text-sm">Remote session</span>
                     </label>
 
+                    {bookingError && (
+                      <div className="alert alert-danger" style={{ padding: '0.75rem', fontSize: '0.875rem', margin: '0.5rem 0' }}>
+                        {bookingError}
+                      </div>
+                    )}
+
                     <button
                       type="submit"
                       className="btn btn-primary w-full"
@@ -291,6 +313,30 @@ export default function ServiceDetail() {
             </div>
           </div>
         </div>
+
+        {/* Confirmation Modal */}
+        <ConfirmationModal
+          isOpen={showConfirmModal}
+          onClose={() => setShowConfirmModal(false)}
+          serviceTitle={service?.title}
+          hours={transactionData.hours_exchanged}
+          providerName={`${service?.first_name || ''} ${service?.last_name || ''}`.trim()}
+          isRemote={transactionData.is_remote}
+          location={transactionData.location}
+          scheduledAt={transactionData.scheduled_at}
+        />
+
+        {/* Delete Confirmation Modal */}
+        <PromptConfirmModal
+          isOpen={showDeleteModal}
+          onClose={() => setShowDeleteModal(false)}
+          onConfirm={handleConfirmDelete}
+          title="Delete Service"
+          message="Are you sure you want to delete this service? This action cannot be undone."
+          confirmText="Delete Service"
+          isDanger={true}
+          loading={deleting}
+        />
       </div>
     </div>
   );

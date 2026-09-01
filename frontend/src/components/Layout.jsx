@@ -45,6 +45,7 @@ export default function Layout() {
 
   const adminLinks = [
     { path: '/admin', label: 'Dashboard' },
+    { path: '/admin/analytics', label: 'Analytics' },
     { path: '/admin/users', label: 'Users' },
     { path: '/admin/services', label: 'Services' },
     { path: '/admin/transactions', label: 'Transactions' },

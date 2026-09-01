@@ -10,15 +10,16 @@ export const validate = (req, res, next) => {
 };
 
 export const handleError = (err, req, res, next) => {
-  console.error(err);
+  console.error('[SERVER ERROR]', err);
   if (err.name === 'ValidationError') {
     return res.status(400).json({ error: err.message });
   }
   if (err.code === 'ER_DUP_ENTRY') {
-    return res.status(409).json({ error: 'Duplicate entry' });
+    return res.status(409).json({ error: 'A record with this information already exists.' });
   }
   if (err.code === 'ER_NO_REFERENCED_ROW_2') {
-    return res.status(400).json({ error: 'Referenced record not found' });
+    return res.status(400).json({ error: 'The referenced record does not exist.' });
   }
-  res.status(500).json({ error: 'Internal server error' });
+  // Never leak internal database query or column details to client
+  res.status(500).json({ error: 'An error occurred while processing your request. Please try again.' });
 };
