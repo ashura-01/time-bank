@@ -1,5 +1,5 @@
 import jwt from 'jsonwebtoken';
-import pool from '../config/db.js';
+import { userRepository } from '../repositories/userRepository.js';
 
 export const authenticate = async (req, res, next) => {
   try {
@@ -11,16 +11,13 @@ export const authenticate = async (req, res, next) => {
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-    const [users] = await pool.query(
-      'SELECT id, email, first_name, last_name, role, time_balance, is_active FROM users WHERE id = ?',
-      [decoded.userId]
-    );
+    const user = await userRepository.findAuthUserById(decoded.userId);
 
-    if (!users.length || !users[0].is_active) {
+    if (!user || !user.is_active) {
       return res.status(401).json({ error: 'User not found or inactive' });
     }
 
-    req.user = users[0];
+    req.user = user;
     next();
   } catch (error) {
     if (error.name === 'JsonWebTokenError' || error.name === 'TokenExpiredError') {
@@ -49,13 +46,10 @@ export const optionalAuth = async (req, res, next) => {
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-    const [users] = await pool.query(
-      'SELECT id, email, first_name, last_name, role, time_balance, is_active FROM users WHERE id = ?',
-      [decoded.userId]
-    );
+    const user = await userRepository.findAuthUserById(decoded.userId);
 
-    if (users.length && users[0].is_active) {
-      req.user = users[0];
+    if (user && user.is_active) {
+      req.user = user;
     }
     next();
   } catch (error) {
