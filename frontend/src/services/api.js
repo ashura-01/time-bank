@@ -62,7 +62,11 @@ export const disputesAPI = {
 
 export const adminAPI = {
   getDashboard: () => api.get('/admin/dashboard'),
+  getAnalytics: () => api.get('/admin/analytics'),
   getUsers: (params) => api.get('/admin/users', { params }),
+  getUserReport: (id) => api.get(`/admin/users/${id}/report`),
+  getUserInsight: (type) => api.get(`/admin/users/insights/${type}`),
+  getServiceInsight: (type) => api.get(`/admin/services/insights/${type}`),
   updateUser: (id, data) => api.put(`/admin/users/${id}`, data),
   deleteUser: (id) => api.delete(`/admin/users/${id}`),
   getServices: (params) => api.get('/admin/services', { params }),

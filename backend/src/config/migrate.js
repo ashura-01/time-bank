@@ -14,6 +14,7 @@ const migrations = [
     avatar_url VARCHAR(500),
     role ENUM('user', 'admin') DEFAULT 'user',
     time_balance DECIMAL(10,2) DEFAULT 5.00,
+    held_balance DECIMAL(10,2) DEFAULT 0.00,
     is_active BOOLEAN DEFAULT TRUE,
     email_verified BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -66,6 +67,8 @@ const migrations = [
     location VARCHAR(255),
     is_remote BOOLEAN DEFAULT FALSE,
     status ENUM('pending', 'confirmed', 'completed', 'cancelled', 'disputed') DEFAULT 'pending',
+    requester_completed_at TIMESTAMP NULL,
+    provider_completed_at TIMESTAMP NULL,
     completed_at TIMESTAMP NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -145,6 +148,13 @@ async function runMigrations() {
     for (const sql of migrations) {
       await connection.query(sql);
     }
+
+    // Ensure held_balance column exists on users table in standard MySQL
+    const [cols] = await connection.query("SHOW COLUMNS FROM users LIKE 'held_balance'");
+    if (cols.length === 0) {
+      await connection.query('ALTER TABLE users ADD COLUMN held_balance DECIMAL(10,2) DEFAULT 0.00 AFTER time_balance');
+    }
+
     await connection.commit();
     console.log('All migrations completed successfully');
   } catch (error) {
