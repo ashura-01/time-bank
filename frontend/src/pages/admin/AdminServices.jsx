@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { adminAPI } from '../../services/api';
+import Toast from '../../components/ui/Toast';
 
 const statusColors = {
   active: 'badge-success',
@@ -8,11 +9,21 @@ const statusColors = {
   cancelled: 'badge-danger'
 };
 
+const INSIGHT_OPTIONS = [
+  { value: '', label: 'Browse all services' },
+  { value: 'unused', label: 'Never requested (LEFT JOIN)' },
+  { value: 'above_category_avg', label: 'Above category-avg duration (correlated subquery)' },
+];
+
 export default function AdminServices() {
   const [services, setServices] = useState([]);
   const [loading, setLoading] = useState(true);
   const [pagination, setPagination] = useState({ page: 1, limit: 20, total: 0, pages: 0 });
+  const [toastMessage, setToastMessage] = useState(null);
   const [filters, setFilters] = useState({ search: '', status: '' });
+  const [insightType, setInsightType] = useState('');
+  const [insightResults, setInsightResults] = useState(null);
+  const [insightLoading, setInsightLoading] = useState(false);
 
   const fetchServices = async () => {
     setLoading(true);
@@ -31,6 +42,26 @@ export default function AdminServices() {
     fetchServices();
   }, [filters.search, filters.status, pagination.page]);
 
+  useEffect(() => {
+    if (!insightType) {
+      setInsightResults(null);
+      return;
+    }
+    const fetchInsight = async () => {
+      setInsightLoading(true);
+      try {
+        const res = await adminAPI.getServiceInsight(insightType);
+        setInsightResults(res.data);
+      } catch (error) {
+        console.error('Failed to load insight:', error);
+        setInsightResults({ services: [], count: 0 });
+      } finally {
+        setInsightLoading(false);
+      }
+    };
+    fetchInsight();
+  }, [insightType]);
+
   const handleFilterChange = (key, value) => {
     setFilters(prev => ({ ...prev, [key]: value }));
     setPagination(prev => ({ ...prev, page: 1 }));
@@ -43,9 +74,10 @@ export default function AdminServices() {
   const handleStatusChange = async (serviceId, status) => {
     try {
       await adminAPI.updateServiceStatus(serviceId, { status });
+      setToastMessage({ text: 'Service status updated successfully', type: 'success' });
       fetchServices();
     } catch (error) {
-      alert(error.response?.data?.error || 'Failed to update service');
+      setToastMessage({ text: error.response?.data?.error || 'Failed to update service', type: 'error' });
     }
   };
 
@@ -82,11 +114,70 @@ export default function AdminServices() {
                 <option value="completed">Completed</option>
                 <option value="cancelled">Cancelled</option>
               </select>
+              <select
+                value={insightType}
+                onChange={e => setInsightType(e.target.value)}
+                className="w-full lg:w-64"
+              >
+                {INSIGHT_OPTIONS.map(opt => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
             </div>
           </div>
         </div>
 
-        {loading ? (
+        {insightType ? (
+          <div className="card">
+            <div className="card-header flex items-center justify-between">
+              <h3 className="font-semibold">
+                {INSIGHT_OPTIONS.find(o => o.value === insightType)?.label}
+                {insightResults && <span className="text-gray-500 font-normal"> — {insightResults.count} service{insightResults.count === 1 ? '' : 's'}</span>}
+              </h3>
+              <button onClick={() => setInsightType('')} className="btn btn-outline btn-sm">Back to all services</button>
+            </div>
+            <div className="card-body p-0">
+              {insightLoading ? (
+                <div className="p-6 text-center text-gray-500">Loading...</div>
+              ) : !insightResults?.services?.length ? (
+                <div className="p-6 text-center text-gray-500">No services match this query</div>
+              ) : (
+                <div className="table-container">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Title</th>
+                        <th>Category</th>
+                        {insightType === 'unused' && <><th>Provider</th><th>Status</th></>}
+                        {insightType === 'above_category_avg' && <><th>Duration</th><th>Category Avg</th></>}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {insightResults.services.map(s => (
+                        <tr key={s.id}>
+                          <td className="font-medium max-w-xs truncate">{s.title}</td>
+                          <td className="text-sm">{s.category_name}</td>
+                          {insightType === 'unused' && (
+                            <>
+                              <td className="text-sm">{s.first_name} {s.last_name}</td>
+                              <td><span className={`badge ${statusColors[s.status]}`}>{s.status}</span></td>
+                            </>
+                          )}
+                          {insightType === 'above_category_avg' && (
+                            <>
+                              <td className="font-medium">{s.duration_hours}h</td>
+                              <td className="text-sm text-gray-500">{s.category_avg_hours}h avg</td>
+                            </>
+                          )}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        ) : loading ? (
           <div className="card animate-pulse">
             <div className="table-container">
               <table>
@@ -186,6 +277,14 @@ export default function AdminServices() {
               </div>
             )}
           </>
+        )}
+
+        {toastMessage && (
+          <Toast
+            message={toastMessage.text}
+            type={toastMessage.type}
+            onClose={() => setToastMessage(null)}
+          />
         )}
       </div>
     </div>

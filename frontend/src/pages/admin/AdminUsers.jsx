@@ -1,8 +1,19 @@
 import { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { adminAPI } from '../../services/api';
+import PromptConfirmModal from '../../components/ui/PromptConfirmModal';
+import Toast from '../../components/ui/Toast';
 
 const roleColors = { admin: 'badge-danger', user: 'badge-gray' };
 const statusColors = { true: 'badge-success', false: 'badge-danger' };
+
+const INSIGHT_OPTIONS = [
+  { value: '', label: 'Browse all users' },
+  { value: 'no_transactions', label: 'Never transacted (LEFT JOIN)' },
+  { value: 'never_reviewed', label: 'Never reviewed (NOT IN subquery)' },
+  { value: 'above_avg_balance', label: 'Above-average balance (subquery)' },
+  { value: 'dual_role', label: 'Both provider & requester (EXISTS x2)' },
+];
 
 export default function AdminUsers() {
   const [users, setUsers] = useState([]);
@@ -10,6 +21,9 @@ export default function AdminUsers() {
   const [pagination, setPagination] = useState({ page: 1, limit: 20, total: 0, pages: 0 });
   const [filters, setFilters] = useState({ search: '', role: '', is_active: '' });
   const [editingUser, setEditingUser] = useState(null);
+  const [insightType, setInsightType] = useState('');
+  const [insightResults, setInsightResults] = useState(null);
+  const [insightLoading, setInsightLoading] = useState(false);
 
   const fetchUsers = async () => {
     setLoading(true);
@@ -28,6 +42,26 @@ export default function AdminUsers() {
     fetchUsers();
   }, [filters.search, filters.role, filters.is_active, pagination.page]);
 
+  useEffect(() => {
+    if (!insightType) {
+      setInsightResults(null);
+      return;
+    }
+    const fetchInsight = async () => {
+      setInsightLoading(true);
+      try {
+        const res = await adminAPI.getUserInsight(insightType);
+        setInsightResults(res.data);
+      } catch (error) {
+        console.error('Failed to load insight:', error);
+        setInsightResults({ users: [], count: 0 });
+      } finally {
+        setInsightLoading(false);
+      }
+    };
+    fetchInsight();
+  }, [insightType]);
+
   const handleFilterChange = (key, value) => {
     setFilters(prev => ({ ...prev, [key]: value }));
     setPagination(prev => ({ ...prev, page: 1 }));
@@ -41,23 +75,29 @@ export default function AdminUsers() {
     setEditingUser({ ...user });
   };
 
+  const [toastMessage, setToastMessage] = useState(null);
+  const [userToDelete, setUserToDelete] = useState(null);
+
   const handleSave = async (user) => {
     try {
       await adminAPI.updateUser(user.id, { role: user.role, is_active: user.is_active, time_balance: user.time_balance });
       setEditingUser(null);
+      setToastMessage({ text: 'User updated successfully', type: 'success' });
       fetchUsers();
     } catch (error) {
-      alert(error.response?.data?.error || 'Failed to update user');
+      setToastMessage({ text: error.response?.data?.error || 'Failed to update user', type: 'error' });
     }
   };
 
-  const handleDelete = async (userId) => {
-    if (!confirm('Are you sure you want to delete this user?')) return;
+  const handleConfirmDelete = async () => {
+    if (!userToDelete) return;
     try {
-      await adminAPI.deleteUser(userId);
+      await adminAPI.deleteUser(userToDelete);
+      setUserToDelete(null);
+      setToastMessage({ text: 'User deleted successfully', type: 'success' });
       fetchUsers();
     } catch (error) {
-      alert(error.response?.data?.error || 'Failed to delete user');
+      setToastMessage({ text: error.response?.data?.error || 'Failed to delete user', type: 'error' });
     }
   };
 
@@ -101,11 +141,60 @@ export default function AdminUsers() {
                 <option value="true">Active</option>
                 <option value="false">Inactive</option>
               </select>
+              <select
+                value={insightType}
+                onChange={e => setInsightType(e.target.value)}
+                className="w-full lg:w-64"
+              >
+                {INSIGHT_OPTIONS.map(opt => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
             </div>
           </div>
         </div>
 
-        {loading ? (
+        {insightType ? (
+          <div className="card">
+            <div className="card-header flex items-center justify-between">
+              <h3 className="font-semibold">
+                {INSIGHT_OPTIONS.find(o => o.value === insightType)?.label}
+                {insightResults && <span className="text-gray-500 font-normal"> — {insightResults.count} user{insightResults.count === 1 ? '' : 's'}</span>}
+              </h3>
+              <button onClick={() => setInsightType('')} className="btn btn-outline btn-sm">Back to all users</button>
+            </div>
+            <div className="card-body p-0">
+              {insightLoading ? (
+                <div className="p-6 text-center text-gray-500">Loading...</div>
+              ) : !insightResults?.users?.length ? (
+                <div className="p-6 text-center text-gray-500">No users match this query</div>
+              ) : (
+                <div className="table-container">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Name</th>
+                        <th>Email</th>
+                        {insightResults.users[0].time_balance !== undefined && <th>Balance</th>}
+                        <th>Report</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {insightResults.users.map(u => (
+                        <tr key={u.id}>
+                          <td className="font-medium">{u.first_name} {u.last_name}</td>
+                          <td className="text-sm">{u.email}</td>
+                          {u.time_balance !== undefined && <td className="font-medium text-primary">{u.time_balance}h</td>}
+                          <td><Link to={`/admin/users/${u.id}/report`} className="btn btn-outline btn-sm">View Report</Link></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        ) : loading ? (
           <div className="card animate-pulse">
             <div className="table-container">
               <table>
@@ -216,8 +305,9 @@ export default function AdminUsers() {
                               </>
                             ) : (
                               <>
+                                <Link to={`/admin/users/${user.id}/report`} className="btn btn-outline btn-sm">Report</Link>
                                 <button onClick={() => handleEdit(user)} className="btn btn-outline btn-sm">Edit</button>
-                                <button onClick={() => handleDelete(user.id)} className="btn btn-outline btn-sm text-danger border-danger hover:bg-red-50">Delete</button>
+                                <button onClick={() => setUserToDelete(user.id)} className="btn btn-outline btn-sm text-danger border-danger hover:bg-red-50">Delete</button>
                               </>
                             )}
                           </div>
@@ -237,6 +327,24 @@ export default function AdminUsers() {
               </div>
             )}
           </>
+        )}
+
+        <PromptConfirmModal
+          isOpen={Boolean(userToDelete)}
+          onClose={() => setUserToDelete(null)}
+          onConfirm={handleConfirmDelete}
+          title="Delete User"
+          message="Are you sure you want to delete this user? This will remove their account and services."
+          confirmText="Delete User"
+          isDanger={true}
+        />
+
+        {toastMessage && (
+          <Toast
+            message={toastMessage.text}
+            type={toastMessage.type}
+            onClose={() => setToastMessage(null)}
+          />
         )}
       </div>
     </div>
