@@ -57,29 +57,34 @@ function PublicRoute({ children }) {
   return children;
 }
 
+import { ChatWidget } from './rag/rag_ui/ChatWidget';
+
 export default function App() {
   return (
-    <Routes>
-      <Route path="/" element={<Layout />}>
-        <Route index element={<Home />} />
-        <Route path="login" element={<PublicRoute><Login /></PublicRoute>} />
-        <Route path="register" element={<PublicRoute><Register /></PublicRoute>} />
-        <Route path="services" element={<Services />} />
-        <Route path="services/:id" element={<ServiceDetail />} />
-        <Route path="services/new" element={<ProtectedRoute><CreateService /></ProtectedRoute>} />
-        <Route path="services/:id/edit" element={<ProtectedRoute><CreateService /></ProtectedRoute>} />
+    <>
+      <Routes>
+        <Route path="/" element={<Layout />}>
+          <Route index element={<Home />} />
+          <Route path="login" element={<PublicRoute><Login /></PublicRoute>} />
+          <Route path="register" element={<PublicRoute><Register /></PublicRoute>} />
+          <Route path="services" element={<Services />} />
+          <Route path="services/:id" element={<ServiceDetail />} />
+          <Route path="services/new" element={<ProtectedRoute><CreateService /></ProtectedRoute>} />
+          <Route path="services/:id/edit" element={<ProtectedRoute><CreateService /></ProtectedRoute>} />
 
-        <Route path="dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
-        <Route path="profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
+          <Route path="dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+          <Route path="profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
 
-        <Route path="admin" element={<ProtectedRoute adminOnly><AdminDashboard /></ProtectedRoute>} />
-        <Route path="admin/analytics" element={<ProtectedRoute adminOnly><AdminAnalytics /></ProtectedRoute>} />
-        <Route path="admin/users" element={<ProtectedRoute adminOnly><AdminUsers /></ProtectedRoute>} />
-        <Route path="admin/users/:id/report" element={<ProtectedRoute adminOnly><AdminUserReport /></ProtectedRoute>} />
-        <Route path="admin/services" element={<ProtectedRoute adminOnly><AdminServices /></ProtectedRoute>} />
-        <Route path="admin/transactions" element={<ProtectedRoute adminOnly><AdminTransactions /></ProtectedRoute>} />
-        <Route path="admin/disputes" element={<ProtectedRoute adminOnly><AdminDisputes /></ProtectedRoute>} />
-      </Route>
-    </Routes>
+          <Route path="admin" element={<ProtectedRoute adminOnly><AdminDashboard /></ProtectedRoute>} />
+          <Route path="admin/analytics" element={<ProtectedRoute adminOnly><AdminAnalytics /></ProtectedRoute>} />
+          <Route path="admin/users" element={<ProtectedRoute adminOnly><AdminUsers /></ProtectedRoute>} />
+          <Route path="admin/users/:id/report" element={<ProtectedRoute adminOnly><AdminUserReport /></ProtectedRoute>} />
+          <Route path="admin/services" element={<ProtectedRoute adminOnly><AdminServices /></ProtectedRoute>} />
+          <Route path="admin/transactions" element={<ProtectedRoute adminOnly><AdminTransactions /></ProtectedRoute>} />
+          <Route path="admin/disputes" element={<ProtectedRoute adminOnly><AdminDisputes /></ProtectedRoute>} />
+        </Route>
+      </Routes>
+      <ChatWidget />
+    </>
   );
 }
