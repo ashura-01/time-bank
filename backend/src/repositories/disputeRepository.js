@@ -18,7 +18,7 @@ export const disputeRepository = {
       [id, transactionId, raisedBy, reason, evidence || null]
     );
 
-    await db.query("UPDATE transactions SET status = 'disputed', updated_at = CURRENT_TIMESTAMP WHERE id = ?", [transactionId]);
+    // Transaction status is automatically set to 'disputed' by a MySQL trigger (after_dispute_insert)
 
     const [dispute] = await db.query(
       `SELECT d.*, t.service_id, s.title as service_title,
@@ -124,12 +124,7 @@ export const disputeRepository = {
       [resolution, status, adminUserId, id]
     );
 
-    if (status === 'resolved') {
-      const [transactions] = await connection.query('SELECT * FROM transactions WHERE id = ?', [transactionId]);
-      if (transactions.length) {
-        await connection.query("UPDATE transactions SET status = 'completed', completed_at = COALESCE(completed_at, CURRENT_TIMESTAMP), updated_at = CURRENT_TIMESTAMP WHERE id = ?", [transactionId]);
-      }
-    }
+    // If status is 'resolved', transaction completion is automatically handled by a MySQL trigger (after_dispute_update)
 
     const [updated] = await connection.query(
       `SELECT d.*, t.service_id, s.title as service_title,
