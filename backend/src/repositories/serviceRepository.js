@@ -67,11 +67,8 @@ export const serviceRepository = {
     else if (sort === 'title') orderBy = 's.title ASC';
 
     const [services] = await pool.query(
-      `SELECT s.*, c.name as category_name, c.icon as category_icon, c.color as category_color,
-              u.first_name, u.last_name, u.avatar_url
-       FROM services s
-       JOIN categories c ON s.category_id = c.id
-       JOIN users u ON s.provider_id = u.id
+      `SELECT *
+       FROM vw_service_details s
        ${whereClause}
        ORDER BY ${orderBy}
        LIMIT ? OFFSET ?`,
@@ -98,9 +95,7 @@ export const serviceRepository = {
 
     const [[{ total }]] = await pool.query(
       `SELECT COUNT(*) as total
-       FROM services s
-       JOIN categories c ON s.category_id = c.id
-       JOIN users u ON s.provider_id = u.id
+       FROM vw_service_details s
        ${whereClause}`,
       params
     );
@@ -116,12 +111,9 @@ export const serviceRepository = {
 
   async findServiceById(id) {
     const [services] = await pool.query(
-      `SELECT s.*, c.name as category_name, c.icon as category_icon, c.color as category_color,
-              u.first_name, u.last_name, u.avatar_url, u.phone, u.bio, u.time_balance as provider_balance
-       FROM services s
-       JOIN categories c ON s.category_id = c.id
-       JOIN users u ON s.provider_id = u.id
-       WHERE s.id = ?`,
+      `SELECT *
+       FROM vw_service_details
+       WHERE id = ?`,
       [id]
     );
 
@@ -145,6 +137,7 @@ export const serviceRepository = {
     const values = [];
 
     if (updateData.title !== undefined) { fields.push('title = ?'); values.push(updateData.title); }
+    if (updateData.category_id !== undefined) { fields.push('category_id = ?'); values.push(updateData.category_id); }
     if (updateData.description !== undefined) { fields.push('description = ?'); values.push(updateData.description); }
     if (updateData.duration_hours !== undefined) { fields.push('duration_hours = ?'); values.push(updateData.duration_hours); }
     if (updateData.location !== undefined) { fields.push('location = ?'); values.push(updateData.location); }
@@ -192,10 +185,8 @@ export const serviceRepository = {
     }
 
     const [services] = await pool.query(
-      `SELECT s.*, c.name as category_name, u.first_name, u.last_name, u.email as provider_email
-       FROM services s
-       JOIN categories c ON s.category_id = c.id
-       JOIN users u ON s.provider_id = u.id
+      `SELECT *
+       FROM vw_service_details s
        ${whereClause}
        ORDER BY s.created_at DESC
        LIMIT ? OFFSET ?`,

@@ -17,6 +17,8 @@ const migrations = [
     held_balance DECIMAL(10,2) DEFAULT 0.00,
     is_active BOOLEAN DEFAULT TRUE,
     email_verified BOOLEAN DEFAULT FALSE,
+    avg_rating DECIMAL(3,2) DEFAULT NULL,
+    review_count INT DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     INDEX idx_email (email),
@@ -83,7 +85,7 @@ const migrations = [
   // Ledger entries table (auditable time-credit ledger)
   `CREATE TABLE IF NOT EXISTS ledger_entries (
     id CHAR(36) PRIMARY KEY,
-    transaction_id CHAR(36) NOT NULL,
+    transaction_id CHAR(36) NULL,
     user_id CHAR(36) NOT NULL,
     entry_type ENUM('credit', 'debit') NOT NULL,
     hours DECIMAL(10,2) NOT NULL,
@@ -138,7 +140,65 @@ const migrations = [
     tag VARCHAR(50) NOT NULL,
     PRIMARY KEY (service_id, tag),
     FOREIGN KEY (service_id) REFERENCES services(id) ON DELETE CASCADE
-  )`
+  )`,
+
+  // Trigger 1: Aggregating User Ratings
+  `DROP TRIGGER IF EXISTS after_review_insert`,
+  `CREATE TRIGGER after_review_insert
+   AFTER INSERT ON reviews
+   FOR EACH ROW
+   BEGIN
+       UPDATE users 
+       SET review_count = review_count + 1,
+           avg_rating = (
+               SELECT AVG(rating) 
+               FROM reviews 
+               WHERE reviewee_id = NEW.reviewee_id
+           )
+       WHERE id = NEW.reviewee_id;
+   END;`,
+
+  // Trigger 2: Auto-generating Audit Logs
+  `DROP TRIGGER IF EXISTS after_user_update_balances`,
+  `CREATE TRIGGER after_user_update_balances
+   AFTER UPDATE ON users
+   FOR EACH ROW
+   BEGIN
+       IF NEW.time_balance < OLD.time_balance THEN
+           INSERT INTO ledger_entries (id, transaction_id, user_id, entry_type, hours, balance_after, description)
+           VALUES (UUID(), @current_transaction_id, NEW.id, 'debit', OLD.time_balance - NEW.time_balance, NEW.time_balance, COALESCE(@ledger_description, 'Manual balance deduction'));
+       ELSEIF NEW.time_balance > OLD.time_balance THEN
+           INSERT INTO ledger_entries (id, transaction_id, user_id, entry_type, hours, balance_after, description)
+           VALUES (UUID(), @current_transaction_id, NEW.id, 'credit', NEW.time_balance - OLD.time_balance, NEW.time_balance, COALESCE(@ledger_description, 'Manual balance addition'));
+       END IF;
+   END;`,
+
+  // Trigger 3: Synchronizing Dispute & Transaction Statuses (AFTER UPDATE) - Removed because payout logic must run in JS
+  `DROP TRIGGER IF EXISTS after_dispute_update`,
+
+  // Trigger 3.1: Synchronizing Dispute & Transaction Statuses (AFTER INSERT)
+  `DROP TRIGGER IF EXISTS after_dispute_insert`,
+  `CREATE TRIGGER after_dispute_insert
+   AFTER INSERT ON disputes
+   FOR EACH ROW
+   BEGIN
+       UPDATE transactions 
+       SET status = 'disputed', updated_at = CURRENT_TIMESTAMP
+       WHERE id = NEW.transaction_id;
+   END;`,
+
+  // Trigger 4: Cascading Service Completion
+  `DROP TRIGGER IF EXISTS after_transaction_complete`,
+  `CREATE TRIGGER after_transaction_complete
+   AFTER UPDATE ON transactions
+   FOR EACH ROW
+   BEGIN
+       IF NEW.status = 'completed' AND OLD.status != 'completed' THEN
+           UPDATE services 
+           SET status = 'completed', updated_at = CURRENT_TIMESTAMP 
+           WHERE id = NEW.service_id;
+       END IF;
+   END;`
 ];
 
 async function runMigrations() {

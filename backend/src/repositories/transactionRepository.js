@@ -2,15 +2,6 @@ import { v4 as uuidv4 } from 'uuid';
 import pool from '../config/db.js';
 
 export const transactionRepository = {
-  async createLedgerEntry(connection, transactionId, userId, entryType, hours, balanceAfter, description) {
-    const id = uuidv4();
-    await connection.query(
-      `INSERT INTO ledger_entries (id, transaction_id, user_id, entry_type, hours, balance_after, description)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [id, transactionId, userId, entryType, hours, balanceAfter, description]
-    );
-    return id;
-  },
 
   async createTransaction(connection, { id, serviceId, requesterId, providerId, hoursExchanged, scheduledAt, location, isRemote }) {
     await connection.query(
@@ -31,15 +22,10 @@ export const transactionRepository = {
     }
 
     const [transactions] = await pool.query(
-      `SELECT t.*, s.title as service_title, s.type as service_type,
-              u1.first_name as requester_first, u1.last_name as requester_last,
-              u2.first_name as provider_first, u2.last_name as provider_last
-       FROM transactions t
-       JOIN services s ON t.service_id = s.id
-       JOIN users u1 ON t.requester_id = u1.id
-       JOIN users u2 ON t.provider_id = u2.id
+      `SELECT *
+       FROM vw_transaction_details t
        ${whereClause}
-       ORDER BY t.created_at DESC
+       ORDER BY created_at DESC
        LIMIT ? OFFSET ?`,
       [...params, parseInt(limit), offset]
     );
@@ -68,13 +54,8 @@ export const transactionRepository = {
     }
 
     const [transactions] = await pool.query(
-      `SELECT t.*, s.title as service_title, s.description as service_description, s.type as service_type,
-              u1.first_name as requester_first, u1.last_name as requester_last, u1.email as requester_email,
-              u2.first_name as provider_first, u2.last_name as provider_last, u2.email as provider_email
-       FROM transactions t
-       JOIN services s ON t.service_id = s.id
-       JOIN users u1 ON t.requester_id = u1.id
-       JOIN users u2 ON t.provider_id = u2.id
+      `SELECT *
+       FROM vw_transaction_details t
        ${whereClause}`,
       params
     );
@@ -125,67 +106,73 @@ export const transactionRepository = {
   },
 
   async holdBalance(connection, userId, hours) {
-    const [result] = await connection.query(
-      'UPDATE users SET time_balance = time_balance - ?, held_balance = held_balance + ? WHERE id = ? AND time_balance >= ?',
-      [hours, hours, userId, hours]
-    );
-    return result.affectedRows > 0;
+    try {
+      await connection.query('SET @ledger_description = ?', ['Funds held for booking']);
+      const [result] = await connection.query(
+        'UPDATE users SET time_balance = time_balance - ?, held_balance = held_balance + ? WHERE id = ? AND time_balance >= ?',
+        [hours, hours, userId, hours]
+      );
+      return result.affectedRows > 0;
+    } finally {
+      await connection.query('SET @ledger_description = NULL');
+    }
   },
 
   async releaseHeldBalance(connection, userId, hours) {
-    const [result] = await connection.query(
-      'UPDATE users SET time_balance = time_balance + ?, held_balance = held_balance - ? WHERE id = ? AND held_balance >= ?',
-      [hours, hours, userId, hours]
-    );
-    return result.affectedRows > 0;
+    try {
+      await connection.query('SET @ledger_description = ?', ['Held funds released']);
+      const [result] = await connection.query(
+        'UPDATE users SET time_balance = time_balance + ?, held_balance = held_balance - ? WHERE id = ? AND held_balance >= ?',
+        [hours, hours, userId, hours]
+      );
+      return result.affectedRows > 0;
+    } finally {
+      await connection.query('SET @ledger_description = NULL');
+    }
   },
 
   async finalizeSettlement(connection, { transactionId, serviceId, payerId, payeeId, hours, isOffer }) {
     const [finalizeResult] = await connection.query(
       `UPDATE transactions SET status = 'completed', completed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
-       WHERE id = ? AND status = 'confirmed'`,
+       WHERE id = ? AND status IN ('confirmed', 'disputed')`,
       [transactionId]
     );
     if (finalizeResult.affectedRows === 0) {
       return { success: false, reason: 'concurrency_conflict' };
     }
 
-    if (isOffer) {
-      // For offer services, payer's funds were moved to held_balance at booking time
-      const [debitHeld] = await connection.query(
-        'UPDATE users SET held_balance = held_balance - ? WHERE id = ? AND held_balance >= ?',
-        [hours, payerId, hours]
-      );
-      if (debitHeld.affectedRows === 0) {
-        return { success: false, reason: 'insufficient_funds' };
+    try {
+      await connection.query('SET @current_transaction_id = ?', [transactionId]);
+
+      if (isOffer) {
+        // For offer services, payer's funds were moved to held_balance at booking time. Time balance already deducted.
+        const [debitHeld] = await connection.query(
+          'UPDATE users SET held_balance = held_balance - ? WHERE id = ? AND held_balance >= ?',
+          [hours, payerId, hours]
+        );
+        if (debitHeld.affectedRows === 0) {
+          return { success: false, reason: 'insufficient_funds' };
+        }
+      } else {
+        // For request services, requester fulfills & pays directly from available time_balance at completion
+        await connection.query('SET @ledger_description = ?', [`Fulfilled request: ${serviceId}`]);
+        const [debitAvail] = await connection.query(
+          'UPDATE users SET time_balance = time_balance - ? WHERE id = ? AND time_balance >= ?',
+          [hours, payerId, hours]
+        );
+        if (debitAvail.affectedRows === 0) {
+          return { success: false, reason: 'insufficient_funds' };
+        }
       }
-    } else {
-      // For request services, requester fulfills & pays directly from available time_balance at completion
-      const [debitAvail] = await connection.query(
-        'UPDATE users SET time_balance = time_balance - ? WHERE id = ? AND time_balance >= ?',
-        [hours, payerId, hours]
-      );
-      if (debitAvail.affectedRows === 0) {
-        return { success: false, reason: 'insufficient_funds' };
-      }
+
+      await connection.query('SET @ledger_description = ?', [isOffer ? `Earned from service: ${serviceId}` : `Service fulfilled: ${serviceId}`]);
+      await connection.query('UPDATE users SET time_balance = time_balance + ? WHERE id = ?', [hours, payeeId]);
+
+      return { success: true };
+    } finally {
+      await connection.query('SET @current_transaction_id = NULL');
+      await connection.query('SET @ledger_description = NULL');
     }
-
-    await connection.query('UPDATE users SET time_balance = time_balance + ? WHERE id = ?', [hours, payeeId]);
-
-    const [[payerRow]] = await connection.query('SELECT time_balance FROM users WHERE id = ?', [payerId]);
-    const [[payeeRow]] = await connection.query('SELECT time_balance FROM users WHERE id = ?', [payeeId]);
-
-    await this.createLedgerEntry(connection, transactionId, payerId, 'debit', hours, payerRow.time_balance,
-      isOffer ? `Paid for service: ${serviceId}` : `Fulfilled request: ${serviceId}`);
-    await this.createLedgerEntry(connection, transactionId, payeeId, 'credit', hours, payeeRow.time_balance,
-      isOffer ? `Earned from service: ${serviceId}` : `Service fulfilled: ${serviceId}`);
-
-    await connection.query(
-      `UPDATE services SET status = 'completed', updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
-      [serviceId]
-    );
-
-    return { success: true };
   },
 
   async getLedgerEntries({ userId, page = 1, limit = 50 } = {}) {
@@ -194,8 +181,8 @@ export const transactionRepository = {
     const [entries] = await pool.query(
       `SELECT le.*, t.service_id, s.title as service_title
        FROM ledger_entries le
-       JOIN transactions t ON le.transaction_id = t.id
-       JOIN services s ON t.service_id = s.id
+       LEFT JOIN transactions t ON le.transaction_id = t.id
+       LEFT JOIN services s ON t.service_id = s.id
        WHERE le.user_id = ?
        ORDER BY le.created_at DESC
        LIMIT ? OFFSET ?`,
@@ -227,15 +214,10 @@ export const transactionRepository = {
     }
 
     const [transactions] = await pool.query(
-      `SELECT t.*, s.title as service_title,
-              u1.first_name as requester_first, u1.last_name as requester_last, u1.email as requester_email,
-              u2.first_name as provider_first, u2.last_name as provider_last, u2.email as provider_email
-       FROM transactions t
-       JOIN services s ON t.service_id = s.id
-       JOIN users u1 ON t.requester_id = u1.id
-       JOIN users u2 ON t.provider_id = u2.id
+      `SELECT *
+       FROM vw_transaction_details t
        ${whereClause}
-       ORDER BY t.created_at DESC
+       ORDER BY created_at DESC
        LIMIT ? OFFSET ?`,
       [...params, parseInt(limit), offset]
     );
