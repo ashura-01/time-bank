@@ -9,6 +9,7 @@ import transactionRoutes from './routes/transactions.js';
 import reviewRoutes from './routes/reviews.js';
 import disputeRoutes from './routes/disputes.js';
 import adminRoutes from './routes/admin.js';
+import chatbotRoutes from './rag/rag_routes/chatbotRoutes.js';
 import { handleError } from './middleware/validate.js';
 
 dotenv.config();
@@ -35,6 +36,7 @@ app.use('/api/transactions', transactionRoutes);
 app.use('/api/reviews', reviewRoutes);
 app.use('/api/disputes', disputeRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/chat', chatbotRoutes);
 
 // Error handling
 app.use(handleError);
@@ -45,6 +47,7 @@ app.use((req, res) => {
 });
 
 import pool from './config/db.js';
+import { connectVectorDB } from './rag/rag_models/vectorDb.js';
 
 app.listen(PORT, async () => {
   console.log(`Server running on port ${PORT}`);
@@ -55,6 +58,9 @@ app.listen(PORT, async () => {
     } else {
       console.log('✅ Escrow protection active: "held_balance" column verified.');
     }
+    
+    // Connect to MongoDB Atlas for RAG Vector Search
+    await connectVectorDB();
   } catch (err) {
     console.error('⚠️ Could not verify database schema on startup:', err.message);
   }
